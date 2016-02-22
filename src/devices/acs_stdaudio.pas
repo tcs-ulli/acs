@@ -1,40 +1,29 @@
 (*
-Standard audio
-
-This file is a part of Audio Components Suite.
-All rights reserved. See the license file for more details.
-
-Copyright (c) 2002-2009, Andrei Borovsky, anb@symmetrica.net
-Copyright (c) 2005-2006  Christian Ulrich, mail@z0m3ie.de
-Copyright (c) 2014-2015  Sergey Bodrov, serbod@gmail.com
+  this file is a part of audio components suite v 2.3 (delphi version).
+  copyright (c) 2002-2005 andrei borovsky. all rights reserved.
+  see the license file for more details.
+  you can contact me at acs@compiler4.net
+  this is the acs for delphi (windows) version of the unit.
 *)
-{
-Status:
-TStdAudioOut Win: AcsBuffer, prefetching, tested OK
-             Lin: not updated
-
-TStdAudioIn Win: not updated
-            Lin: not updated
-}
 
 unit acs_stdaudio;
 
 interface
 
 uses
-  Classes, SysUtils, syncobjs, ACS_Types, ACS_Classes, ACS_Audio, ACS_Strings
-{$IFDEF MSWINDOWS}
-  , MMSystem
-{$ELSE}
-  , baseunix, Soundcard
-{$ENDIF}
+  Classes, SysUtils, ACS_Types, ACS_Classes, ACS_Audio, ACS_Strings
+  {$IFDEF MSWINDOWS}
+  , Windows, MMSystem
+  {$ELSE}
+  , Soundcard
+  {$ENDIF}
   ;
 
 const
   LATENCY = 110;
 
 type
-{$IFDEF MSWINDOWS}
+  {$IFDEF MSWINDOWS}
   {$IFDEF FPC}
   TWaveInCapsA = WAVEINCAPSA;
   TWaveInCaps = TWaveInCapsA;
@@ -43,49 +32,34 @@ type
   {$ENDIF}
 
   PPWaveHdr = ^PWaveHdr;
-{$ENDIF}
+  {$ENDIF}
 
   { TStdAudioOut }
-  { Windows Wavemapper consume audio data as chain of prepared buffers - blocks.
-    Each block points to sample data and to next block. When block played, it
-    set flag WHDR_DONE }
+
   TStdAudioOut = class(TAcsAudioOutDriver)
   private
-    _audio_fd: Integer;
-    FTimeElapsed: Real;
-{$IFDEF MSWINDOWS}
-    { first block in chain }
-    FirstBlock: PWaveHdr;
-    { last block in chain }
-    LastBlock: PWaveHdr;
-    { number of blocks in use }
-    FBlockCount: Integer;
-    { size of single block, aligned to sample size }
-    FBlockSize: Integer;
-    //EOC: PPWaveHdr;
-    { how many buffer blocks we use }
+    {$IFDEF MSWINDOWS}
+    BlockChain: PWaveHdr;
+    aBlock: Integer;
+    EOC: PPWaveHdr;
     FReadChunks: Integer;
+    {$ENDIF}
+    _audio_fd: Integer;
+    {$IFDEF MSWINDOWS}
     procedure WriteBlock(P: Pointer; Len: Integer);
-    { remove played block from chain, return remaining blocks size }
-    function ClearUsedBlocks(): Integer;
-{$ENDIF}
+    procedure AddBlockToChain(WH: PWaveHdr);
+    {$ENDIF}
   protected
-    function GetTE(): Real; override;
-    function GetDeviceCount(): Integer; override;
+    function GetDeviceCount: Integer; override;
     procedure SetDevice(Ch: Integer); override;
-    function GetDeviceName(ADeviceNumber: Integer): string; override;
-    function GetDeviceInfo(ADeviceNumber: Integer): TAcsDeviceInfo; override;
+    //function GetDeviceInfo: TACSDeviceInfo; override;
   public
     constructor Create(AOwner: TComponent); override;
-    destructor Destroy(); override;
-    procedure Init(); override;
+    destructor Destroy; override;
+    procedure Init; override;
+    procedure Done; override;
     function DoOutput(Abort: Boolean): Boolean; override;
-    procedure Done(); override;
-    { increase played time by number of played bytes, used in player callback }
-    procedure PlayedBytes(AValue: Integer);
   end;
-
-  { TStdAudioIn }
 
   TStdAudioIn = class(TAcsAudioInDriver)
   private
@@ -105,89 +79,59 @@ type
     procedure AddBlockToChain(WH: PWaveHdr);
     {$ENDIF}
   protected
-    function GetBPS(): Integer; override;
-    function GetCh(): Integer; override;
-    function GetSR(): Integer; override;
-    function GetDeviceCount(): Integer; override;
+    function GetBPS: Integer; override;
+    function GetCh: Integer; override;
+    //function GetSR: Integer; override;
     procedure SetDevice(Ch: Integer); override;
-    function GetDeviceName(ADeviceNumber: Integer): string; override;
-    function GetDeviceInfo(ADeviceNumber: Integer): TAcsDeviceInfo; override;
+    //function GetDeviceInfo: TACSDeviceInfo; override;
+    //function GetTotalTime: Real; override;
   public
     constructor Create(AOwner: TComponent); override;
-    destructor Destroy(); override;
-    function GetData(ABuffer: Pointer; ABufferSize: Integer): Integer; override;
-    procedure Init(); override;
-    procedure Done(); override;
+    destructor Destroy; override;
+    function GetData(Buffer: Pointer; oBufferSize: Integer): Integer; override;
+    procedure Init; override;
+    procedure Done; override;
   end;
 
 var
   InputChannelsCount: Integer;
   OutputChannelsCount: Integer;
 
-function GetAudioDeviceInfo(DevID: Integer; OutputDev: Boolean): TAcsDeviceInfo;
+function GetAudioDeviceInfo(DevID: Integer; OutputDev: Boolean): TACSDeviceInfo;
 
 implementation
 
 var
-  CrSecI, CrSecO: TCriticalSection;
+  CrSecI, CrSecO: TRTLCriticalSection;
   
 {$IFDEF MSWINDOWS}
-  {$I win32\acs_audio.inc}
+{$I win32\acs_audio.inc}
 {$ELSE}
-  {$I linux\acs_audio.inc}
+{$I linux\acs_audio.inc}
 {$ENDIF}
 
-function TStdAudioOut.GetTE(): Real;
+{
+function TStdAudioOut.GetDeviceInfo: TACSDeviceInfo;
 begin
-  //Result:=inherited GetTE;
-  Result:=FTimeElapsed;
+  Result:=GetAudioDeviceInfo(FBaseChannel, True);
 end;
 
-function TStdAudioOut.GetDeviceName(ADeviceNumber: Integer): string;
+function TStdAudioIn.GetDeviceInfo: TACSDeviceInfo;
 begin
-  Result:=GetDeviceInfo(ADeviceNumber).DeviceName;
+  Result:=GetAudioDeviceInfo(FBaseChannel, False);
 end;
-
-function TStdAudioOut.GetDeviceInfo(ADeviceNumber: Integer): TAcsDeviceInfo;
+function TStdAudioIn.GetTotalTime: Real;
 begin
-  //Result:=GetAudioDeviceInfo(FBaseChannel, True);
-  Result:=GetAudioDeviceInfo(ADeviceNumber, True);
+  Result:=RecTime;
 end;
-
-function TStdAudioOut.GetDeviceCount(): Integer;
-begin
-  Result:=OutputChannelsCount;
-end;
-
-procedure TStdAudioOut.PlayedBytes(AValue: Integer);
-begin
-  FTimeElapsed:=FTimeElapsed + ((AValue div FSampleSize) / FInput.SampleRate);
-end;
-
-{ TStdAudioIn }
-
-function TStdAudioIn.GetDeviceName(ADeviceNumber: Integer): string;
-begin
-  Result:=GetDeviceInfo(ADeviceNumber).DeviceName;
-end;
-
-function TStdAudioIn.GetDeviceInfo(ADeviceNumber: Integer): TAcsDeviceInfo;
-begin
-  //Result:=GetAudioDeviceInfo(FBaseChannel, False);
-  Result:=GetAudioDeviceInfo(ADeviceNumber, False);
-end;
-
-function TStdAudioIn.GetDeviceCount(): Integer;
-begin
-  Result:=InputChannelsCount;
-end;
+}
 
 constructor TStdAudioIn.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   FBPS:=8;
   FChan:=1;
-  FSampleRate:=8000;
+  //FFreq:=8000;
   //FSize:=-1;
   FRecTime:=600;
   BufferSize:=$1000;
@@ -196,21 +140,24 @@ begin
   {$ENDIF}
 end;
 
+function TStdAudioOut.GetDeviceCount: Integer;
+begin
+  Result:=OutputChannelsCount;
+end;
+
 initialization
   {$IFDEF MSWINDOWS}
-  CrSecI := TCriticalSection.Create();
-  CrSecO := TCriticalSection.Create();
+  InitializeCriticalSection(CrSecI);
+  InitializeCriticalSection(CrSecO);
   {$ENDIF}
-  CountChannels();
-  if OutputChannelsCount > 0 then
-    RegisterAudioOut('Wavemapper', TStdAudioOut, LATENCY);
-  if InputChannelsCount > 0 then
-    RegisterAudioIn('Wavemapper', TStdAudioIn, LATENCY);
+  CountChannels;
+  RegisterAudioOut('Wavemapper', TStdAudioOut, LATENCY);
+  RegisterAudioIn('Wavemapper', TStdAudioIn, LATENCY);
 
 finalization
   {$IFDEF MSWINDOWS}
-  FreeAndNil(CrSecO);
-  FreeAndNil(CrSecI);
+  DeleteCriticalSection(CrSecI);
+  DeleteCriticalSection(CrSecO);
   {$ENDIF}
 
 end.

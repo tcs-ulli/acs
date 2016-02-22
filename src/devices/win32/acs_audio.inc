@@ -1,22 +1,5 @@
-(*
-  Windows standard audio for acs_audio.pas
 
-  This file is a part of Audio Components Suite.
-  All rights reserved. See the license file for more details.
-
-  Copyright (c) 2002-2009, Andrei Borovsky, anb@symmetrica.net
-  Copyright (c) 2005-2006  Christian Ulrich, mail@z0m3ie.de
-  Copyright (c) 2014-2015  Sergey Bodrov, serbod@gmail.com
-*)
-
-function CountChannels(): Integer;
-begin
-  Result:=0;
-  OutputChannelsCount:=waveOutGetNumDevs;
-  InputChannelsCount:=waveInGetNumDevs;
-end;
-
-function GetAudioDeviceInfo(DevID: Integer; OutputDev: Boolean): TAcsDeviceInfo;
+function GetAudioDeviceInfo(DevID: Integer; OutputDev: Boolean): TACSDeviceInfo;
 var
   WIC: TWaveInCaps;
   i: Integer;
@@ -24,12 +7,12 @@ begin
   if OutputDev then
   begin
     if DevID >= OutputChannelsCount then
-      raise EAcsException.Create(Format(strChannelnotavailable, [DevId]));
+      raise EACSException.Create(Format(strChannelnotavailable, [DevId]));
   end
   else
   begin
     if DevID >= InputChannelsCount then
-      raise EAcsException.Create(Format(strChannelnotavailable, [DevId]));
+      raise EACSException.Create(Format(strChannelnotavailable, [DevId]));
   end;
   if OutputDev then
     waveOutGetDevCaps(DevID, @WIC, SizeOf(WIC))
@@ -39,9 +22,6 @@ begin
   while WIC.szPname[i] <> #0 do Inc(i);
   SetLength(Result.DeviceName, i);
   Move(WIC.szPname[0], Result.DeviceName[1], i);
-  {$ifdef FPC}
-  Result.DeviceName:=AnsiToUtf8(Result.DeviceName);
-  {$endif}
   Result.Formats:=[];
   if (WIC.dwFormats and WAVE_FORMAT_1M08) <> 0 then Result.Formats := Result.Formats + [af1M08];
   if (WIC.dwFormats and WAVE_FORMAT_1M16) <> 0 then Result.Formats := Result.Formats + [af1M16];
@@ -63,43 +43,153 @@ procedure WaveOutProc(hwo, Msg: LongWord; Instance: Pointer; Param1, Param2: Lon
 var
   Audio: TStdAudioOut;
 begin
-  //EnterCriticalSection(CrSecO);
+  EnterCriticalSection(CrSecO);
   if Msg = WOM_DONE then
   begin
     Audio:=TStdAudioOut(Instance);
-    Audio.PlayedBytes(PWaveHdr(Param1).dwBufferLength);
+    Audio.AddBlockToChain(PWaveHdr(Param1));
   end;
-  //LeaveCriticalSection(CrSecO);
+  LeaveCriticalSection(CrSecO);
 end;
 
 procedure WaveInProc(hwi, Msg: LongWord; Instance: Pointer; Param1, Param2: LongWord); stdcall;
 var
   Audio: TStdAudioIn;
 begin
-  CrSecI.Enter();
+  EnterCriticalSection(CrSecI);
   if Msg = WIM_DATA then
   begin
     Audio:=TStdAudioIn(Instance);
     Audio.AddBlockToChain(PWaveHdr(Param1));
   end;
-  CrSecI.Leave();
+  LeaveCriticalSection(CrSecI);
 end;
 
-function MMResultStr(Res: MMRESULT): string;
+procedure TStdAudioOut.AddBlockToChain(WH: PWaveHdr);
 begin
-  Result:='';
-  if Res = MMSYSERR_NOERROR then
-    // OK
-  else if Res = MMSYSERR_INVALHANDLE then
-    Result:='Specified device handle is invalid'
-  else if Res = MMSYSERR_NODRIVER then
-    Result:='No device driver is present'
-  else if Res = MMSYSERR_NOMEM then
-    Result:='Unable to allocate or lock memory'
-  else if Res = WAVERR_STILLPLAYING then
-    Result:='The data block pointed to by the pwh parameter is still in the queue'
-  else if Res = WAVERR_UNPREPARED then
-    Result:='The data block pointed to by the pwh parameter hasn''t been prepared';
+  WH.lpNext:=nil;
+  EOC^:=WH;
+  EOC:=@WH.lpNext;
+  Dec(aBlock);
+end;
+
+procedure TStdAudioOut.SetDevice(Ch: Integer);
+begin
+  //if Busy then
+  //  raise EACSException.Create(strBusy);
+  if OutputChannelsCount = 0 then
+    FBaseChannel:=0
+  else
+    if Ch < OutputChannelsCount then
+      FBaseChannel:=Ch
+    else
+      raise EACSException.Create(Format(strChannelnotavailable, [Ch]));
+end;
+
+procedure TStdAudioOut.Init;
+var
+  WF: TPCMWaveFormat;
+begin
+  // No exceptions here!
+  if not Assigned(FInput) then Exit;
+  FInput.Init;
+
+  WF.wf.wFormatTag:=WAVE_FORMAT_PCM;
+  WF.wf.nChannels:=FInput.Channels;
+  WF.wf.nSamplesPerSec:=FInput.SampleRate;
+  WF.wBitsPerSample:=FInput.BitsPerSample;
+  WF.wf.nAvgBytesPerSec:=WF.wf.nSamplesPerSec*(WF.wBitsPerSample div 8);
+  WF.wf.nBlockAlign:=WF.wf.nChannels*(WF.wBitsPerSample div 8);
+
+  waveOutOpen(@_audio_fd, FBaseChannel, @WF, DWORD(@WaveOutProc), DWORD(Self), CALLBACK_FUNCTION or WAVE_MAPPED);
+  aBlock:=0;
+  FBuffer:=AllocMem(FBufferSize);
+  EOC:=@BlockChain;
+end;
+
+procedure TStdAudioOut.Done;
+var
+  Tmp: PWaveHdr;
+begin
+  if _audio_fd <> -1 then
+  begin
+    while aBlock > 0 do;
+    Tmp:=BlockChain;
+    while Tmp <> nil do
+    begin
+      BlockChain:=Tmp.lpNext;
+      waveOutUnprepareHeader(_audio_fd, Tmp, SizeOf(TWaveHdr));
+      FreeMem(Tmp.lpData);
+      Dispose(Tmp);
+      Tmp:=BlockChain;
+    end;
+    EOC:=@BlockChain;
+    waveOutClose(_audio_fd);
+    FreeMem(FBuffer);
+    _audio_fd:=-1;
+  end;
+  //FInput.Flush;
+end;
+
+function TStdAudioOut.DoOutput(Abort: Boolean): Boolean;
+var
+  Len, i, k, vCoef: Integer;
+  P: Pointer;
+  P1: PACSBuffer8;
+  P2: PACSBuffer16;
+  Tmp: PWaveHdr;
+begin
+  // No exceptions Here
+  Result:=True;
+  //if not Busy then Exit;
+  if Abort or (not CanOutput) then
+  begin
+    Result:=False;
+    Exit;
+  end;
+  Tmp:=BlockChain; // clear pending data blocks
+  while Tmp <> nil do
+  begin
+    BlockChain:=Tmp.lpNext;
+    waveOutUnprepareHeader(_audio_fd, Tmp, SizeOf(TWaveHdr));
+    FreeMem(Tmp.lpData);
+    Dispose(Tmp);
+    Tmp:=BlockChain;
+  end;
+  EOC:=@BlockChain;
+  (* Write more than one block. This is needed for audio sources like
+     Vorbis codec that return data in small chunks. *)
+  for k:=aBlock to FReadChunks do
+  begin
+    GetMem(P, (FBufferSize div FReadChunks));
+    while InputLock do;
+    InputLock:=True;
+    Len:=Finput.GetData(P, (FBufferSize div FReadChunks));
+    InputLock:=False;
+    if Len>0 then
+      Result:=True
+    else
+    begin
+      Result:=False;
+      FreeMem(P);
+      Exit;
+    end;
+    if FVolume < 255 then
+    begin
+      vCoef:=Round(FVolume/255);
+      if FInput.BitsPerSample = 16 then
+      begin
+        P2:=P;
+        for i:=0 to (Len shr 1)-1 do P2[i]:=P2[i]*vCoef;
+      end
+      else // FInput.BitsPerSample = 8
+      begin
+        P1:=P;
+        for i:=0 to Len-1 do P1[i]:=P1[i]*vCoef;
+      end;
+    end;
+    WriteBlock(P, Len);
+  end;
 end;
 
 constructor TStdAudioOut.Create(AOwner: TComponent);
@@ -109,260 +199,73 @@ begin
   FVolume:=255;
   _audio_fd:=-1;
   Delay:=6;
-  FReadChunks:=4;
-  FBufferSize:=$8000; // default buffer size
+  FReadChunks:=8;
+  FBufferSize:=$8000;
 end;
 
-destructor TStdAudioOut.Destroy();
+destructor TStdAudioOut.Destroy;
 begin
   if _audio_fd <> -1 then WaveOutClose(_audio_fd);
   inherited Destroy;
 end;
 
-function TStdAudioOut.ClearUsedBlocks(): Integer;
-var
-  WH: PWaveHdr;
-begin
-  Result:=0;
-  WH:=FirstBlock;
-  while WH <> nil do
-  begin
-    if (WH.dwFlags AND WHDR_DONE) <> 0 then
-    begin
-      // Remove consumed block from chain
-      FirstBlock:=WH.lpNext;
-      waveOutUnprepareHeader(_audio_fd, WH, SizeOf(TWaveHdr));
-      Dispose(WH);
-      Dec(FBlockCount);
-      if FBlockCount = 0 then LastBlock:=nil;
-      WH:=FirstBlock;
-    end
-    else
-    begin
-      Inc(Result, WH.dwBufferLength);
-      WH:=WH.lpNext;
-    end;
-  end;
-end;
-
-procedure TStdAudioOut.SetDevice(Ch: Integer);
-begin
-  if Active then
-    raise EAcsException.Create(strBusy);
-  if OutputChannelsCount = 0 then
-    FBaseChannel:=0
-  else
-    if Ch < OutputChannelsCount then
-      FBaseChannel:=Ch
-    else
-      raise EAcsException.Create(Format(strChannelnotavailable, [Ch]));
-end;
-
-procedure TStdAudioOut.Init();
-var
-  WF: TPCMWaveFormat;
-  Res: MMRESULT;
-begin
-  inherited Init();
-  // No exceptions here!
-  FSampleSize:=FInput.Channels * (FInput.BitsPerSample div 8);
-  FTimeElapsed:=0;
-
-  WF.wf.wFormatTag:=WAVE_FORMAT_PCM;
-  WF.wf.nChannels:=FInput.Channels;
-  WF.wf.nSamplesPerSec:=FInput.SampleRate;
-  WF.wBitsPerSample:=FInput.BitsPerSample;
-  WF.wf.nAvgBytesPerSec:=WF.wf.nSamplesPerSec * (WF.wBitsPerSample div 8);
-  WF.wf.nBlockAlign:=FSampleSize;
-
-  { To see whether a device supports a particular format (standard or
-  nonstandard), you can call the waveOutOpen function with the WAVE_FORMAT_QUERY flag. }
-  Res:=waveOutOpen(@_audio_fd, FBaseChannel, @WF, 0, 0, WAVE_FORMAT_QUERY or WAVE_MAPPED);
-  if Res <> MMSYSERR_NOERROR then
-  begin
-    Done();
-    Exit;
-  end;
-
-  Res:=waveOutOpen(@_audio_fd, FBaseChannel, @WF, PtrUInt(@WaveOutProc), DWORD(Self), CALLBACK_FUNCTION or WAVE_MAPPED);
-  FBlockCount:=0;
-  FBlockSize:=(FBuffer.Size div FReadChunks);
-  FBlockSize:=FBlockSize - (FBlockSize mod FSampleSize); // aligned block size
-  FirstBlock:=nil;
-  LastBlock:=nil;
-  FBuffer.Reset();
-end;
-
-procedure TStdAudioOut.Done();
-var
-  WH: PWaveHdr;
-begin
-  if _audio_fd <> -1 then
-  begin
-    { The waveOutReset function stops playback on the given waveform-audio
-    output device and resets the current position to zero. All pending playback
-    buffers are marked as done (WHDR_DONE) and returned to the application. }
-    waveOutReset(_audio_fd);
-    ClearUsedBlocks();
-    { The waveOutClose function closes the given waveform-audio output device. }
-    waveOutClose(_audio_fd);
-    _audio_fd:=-1;
-  end;
-  inherited Done();
-end;
-
-procedure TStdAudioOut.WriteBlock(P: Pointer; Len: Integer);
-var
-  WH: PWaveHdr;
-  Res: string;
-begin
-  Inc(FBlockCount);
-  New(WH);
-  WH.lpNext:=nil;
-  WH.lpData:=P;
-  WH.dwBufferLength:=Len;
-  WH.dwLoops:=0;
-  WH.dwFlags:=0;
-  waveOutPrepareHeader(_audio_fd, WH, SizeOf(TWaveHdr));
-  if not Assigned(FirstBlock) then FirstBlock:=WH;
-  if Assigned(LastBlock) then LastBlock.lpNext:=WH;
-  LastBlock:=WH;
-
-  Res:=MMResultStr(waveOutWrite(_audio_fd, WH, SizeOf(TWaveHdr)));
-  if (Res <> '') then
-  begin
-    if Assigned(OnThreadException) then
-      OnThreadException(Self, Exception.Create(Res))
-    else
-      raise EAcsException.Create(Res);
-  end;
-end;
-
-function TStdAudioOut.DoOutput(Abort: Boolean): Boolean;
-var
-  Len, i, k, vCoef, BytesAllowed: Integer;
-  P8: PAcsBuffer8;
-  P16: PAcsBuffer16;
-  WH: PWaveHdr;
-begin
-  // No exceptions Here
-  Result:=False;
-  if not Assigned(FInput) then Exit;
-  if Abort or (not CanOutput) then Exit;
-  if not Active then Exit;
-
-  // Get allowed output data size
-  BytesAllowed:=(FBlockSize*FReadChunks) - ClearUsedBlocks();
-
-  (* Write more than one block. This is needed for audio sources like
-     Vorbis codec that return data in small chunks. *)
-  //for k:=FBlockCount to FReadChunks do
-  if (BytesAllowed >= FPrefetchSize) and (FBlockCount < FReadChunks) then
-  begin
-    while InputLock do Sleep(1);
-    InputLock:=True;
-    Len:=FBuffer.GetBufWriteSize(BytesAllowed);
-    if Len > FBlockSize then Len:=FBlockSize;
-    Assert(FBuffer.WritePosition >= 0);
-    Assert((FBuffer.WritePosition + Len) <= FBuffer.Size, 'WP='+IntToStr(FBuffer.WritePosition)+'  Len='+IntToStr(Len)+'  Size='+IntToStr(FBuffer.Size));
-    Len:=FInput.GetData(FBuffer.Memory + FBuffer.WritePosition, Len);
-    InputLock:=False;
-    if Len <= 0 then
-    begin
-      // let buffers deplete before stopping
-      //Result:=(FBlockCount > 0);
-      Result:=(FBlockCount > 0);
-      Exit;
-    end;
-    // manually move writing position
-    FBuffer.WritePosition:=FBuffer.WritePosition + Len;
-    if FBuffer.WritePosition = FBuffer.Size then FBuffer.WritePosition:=0;
-
-    // change volume
-    if FVolume < 255 then
-    begin
-      vCoef:=Round(FVolume/255);
-      if FInput.BitsPerSample = 16 then
-      begin
-        P16:=FBuffer.Memory;
-        for i:=0 to (Len div 2)-1 do P16[i]:=P16[i] * vCoef;
-      end
-      else if FInput.BitsPerSample = 8 then
-      begin
-        P8:=FBuffer.Memory;
-        for i:=0 to Len-1 do P8[i]:=P8[i] * vCoef;
-      end;
-    end;
-    // create output block, that points to data, and add it to playing chain
-    Assert(FBuffer.ReadPosition >= 0);
-    Assert((FBuffer.ReadPosition + Len) <= FBuffer.Size);
-    CrSecO.Enter();
-    try
-      WriteBlock(FBuffer.Memory+FBuffer.ReadPosition, Len);
-    finally
-      CrSecO.Leave();
-    end;
-    // manually move read position
-    FBuffer.ReadPosition:=FBuffer.ReadPosition + Len;
-    if FBuffer.ReadPosition = FBuffer.Size then FBuffer.ReadPosition:=0;
-  end;
-  Result:=True;
-end;
-
-{ TStdAudioIn }
-
-destructor TStdAudioIn.Destroy();
+destructor TStdAudioIn.Destroy;
 begin
   waveInClose(_audio_fd);
   inherited Destroy;
 end;
 
-procedure TStdAudioIn.OpenAudio();
+procedure TStdAudioIn.OpenAudio;
 var
   WF: TPCMWaveFormat;
 begin
   WF.wf.wFormatTag:=WAVE_FORMAT_PCM;
   WF.wf.nChannels:=FChan;
-  WF.wf.nSamplesPerSec:=FSampleRate;
+  //WF.wf.nSamplesPerSec:=FFreq;
   WF.wBitsPerSample:=FBPS;
   WF.wf.nAvgBytesPerSec:=WF.wf.nSamplesPerSec*(WF.wBitsPerSample div 8);
   WF.wf.nBlockAlign:=WF.wf.nChannels*(WF.wBitsPerSample div 8);
   if FOpened = 0 then
   begin
-    waveInOpen(@_audio_fd, FBaseChannel, @WF, PtrUInt(@WaveInProc), DWORD(Self), CALLBACK_FUNCTION or WAVE_MAPPED);
+    waveInOpen(@_audio_fd, FBaseChannel, @WF, DWORD(@WaveInProc), DWORD(Self), CALLBACK_FUNCTION or WAVE_MAPPED);
   end;
   Inc(FOpened);
 end;
 
-procedure TStdAudioIn.CloseAudio();
+procedure TStdAudioIn.CloseAudio;
 begin
   if FOpened = 1 then
   begin
     waveInClose(_audio_fd);
-    FreeMem(FBuffer);
+    //FreeMem(FBuffer);
   end;
   if FOpened > 0 then Dec(FOpened);
 end;
 
-function TStdAudioIn.GetBPS(): Integer;
+function TStdAudioIn.GetBPS: Integer;
 begin
   Result:=FBPS;
 end;
 
-function TStdAudioIn.GetCh(): Integer;
+function TStdAudioIn.GetCh: Integer;
 begin
   Result:=FChan;
 end;
-
-function TStdAudioIn.GetSR(): Integer;
+{
+function TStdAudioIn.GetSR: Integer;
 begin
-  Result:=FSampleRate;
+  Result:=FFreq;
 end;
-
-procedure TStdAudioIn.Init();
+}
+procedure TStdAudioIn.Init;
 begin
-  inherited Init();
-  FRecBytes:=Trunc(FRecTime * (GetBPS div 8) * GetCh * GetSR);
+  //if Busy then
+  //  raise EACSException.Create(strBusy);
+  BufEnd:=0;
+  BufStart:=1;
+  FPosition:=0;
+  FRecBytes:=round(FRecTime*(GetBPS div 8)*GetCh*GetSR);
+  //FBusy:=True;
   OpenAudio;
   waveInStart(_audio_fd);
   BlockChain:=nil;
@@ -371,7 +274,7 @@ begin
   EOC:=@BlockChain;
 end;
 
-procedure TStdAudioIn.Done();
+procedure TStdAudioIn.Done;
 var
   Tmp: PWaveHdr;
 begin
@@ -388,29 +291,29 @@ begin
     Tmp:=BlockChain;
   end;
   CloseAudio;
-  inherited Done();
+  //FBusy:=False;
 end;
 
 procedure TStdAudioIn.SetDevice(Ch: Integer);
 begin
-  if Active then
-    raise EAcsException.Create(strBusy);
+  //if Busy then
+  //  raise EACSException.Create(strBusy);
   if Ch < InputChannelsCount then FBaseChannel:=Ch
   else
-    raise EAcsException.Create(Format(strChannelnotavailable, [Ch]));
+    raise EACSException.Create(Format(strChannelnotavailable, [Ch]));
 end;
 
-function TStdAudioIn.GetData(ABuffer: Pointer; ABufferSize: Integer): Integer;
+function TStdAudioIn.GetData(Buffer: Pointer; oBufferSize: Integer): Integer;
 var
   Tmp: PWaveHdr;
 begin
   Result:=0;
-  if not Active then
-    raise EAcsException.Create(strStreamnotopen);
+  //if not Busy then
+  //  raise EACSException.Create(strStreamnotopen);
   if FRecBytes >= 0 then
     if (FPosition >= FRecBytes) then Exit;
 
-  while aBlock < FBlocksCount do NewBlock();
+  while aBlock < FBlocksCount do NewBlock;
   if BufStart > BufEnd then
   begin
     BufStart:=1;
@@ -424,16 +327,30 @@ begin
     FreeMem(Tmp.lpData);
     Dispose(Tmp);
   end;
-  if ABufferSize < (BufEnd-BufStart+1) then
-    Result:=ABufferSize
+  if BufferSize < (BufEnd-BufStart+1) then
+    Result:=BufferSize
   else
     Result:=BufEnd-BufStart+1;
-  Move(FBuffer[BufStart], ABuffer^, Result);
+  Move(FBuffer[BufStart], Buffer^, Result);
   Inc(BufStart, Result);
   Inc(FPosition, Result);
 end;
 
-procedure TStdAudioIn.NewBlock();
+procedure TStdAudioOut.WriteBlock(P: Pointer; Len: Integer);
+var
+  WH: PWaveHdr;
+begin
+  Inc(aBlock);
+  New(WH);
+  WH.lpData:=P;
+  WH.dwBufferLength:=Len;
+  WH.dwLoops:=0;
+  WH.dwFlags:=0;
+  waveOutPrepareHeader(_audio_fd, WH, SizeOf(TWaveHdr));
+  waveOutWrite(_audio_fd, WH, SizeOf(TWaveHdr));
+end;
+
+procedure TStdAudioIn.NewBlock;
 var
   WH: PWaveHdr;
 begin
@@ -444,6 +361,13 @@ begin
   waveInPrepareHeader(_audio_fd, WH, SizeOf(TWaveHdr));
   waveInAddBuffer(_audio_fd, WH, SizeOf(TWaveHdr));
   Inc(aBlock);
+end;
+
+function CountChannels: Integer;
+begin
+  Result:=0;
+  OutputChannelsCount:=waveOutGetNumDevs;
+  InputChannelsCount:=waveInGetNumDevs;
 end;
 
 procedure TStdAudioIn.AddBlockToChain(WH: PWaveHdr);
