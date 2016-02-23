@@ -21,6 +21,7 @@ type
     bStop: TBitBtn;
     cbRecordSource: TComboBox;
     Label1: TLabel;
+    OpenDialog1: TOpenDialog;
     procedure FormCreate(Sender: TObject);
     procedure bOpenClick(Sender: TObject);
     procedure bRecordClick(Sender: TObject);
@@ -44,14 +45,15 @@ var
   i : Integer;
 begin
   for i := 0 to Mixer1.Channelcount-1 do
-    if Mixer1.IsRecordable(i) then
+    //if Mixer1.IsRecordable(i) then
       cbRecordSource.Items.Add(Mixer1.ChannelName[i]);
   cbRecordSource.Text := Mixer1.ChannelName[Mixer1.RecordSource];
 end;
 
 procedure TfMain.bOpenClick(Sender: TObject);
 begin
-  FileOut1.Open;
+  if OpenDialog1.Execute then
+    FileOut1.FileName:=OpenDialog1.FileName;
   if FileExists(FileOut1.FileName) then
     FileOut1.FileMode := foAppend;
 end;

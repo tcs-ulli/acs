@@ -7,10 +7,8 @@ uses
   cthreads,
   {$ENDIF}{$ENDIF}
   Interfaces, // this includes the LCL widgetset
-  Forms, umain
+  Forms, laz_acs, umain
   { you can add units after this };
-
-{$R *.res}
 
 begin
   RequireDerivedFormResource := True;

@@ -69,7 +69,7 @@ uses
 {$ENDIF}
 
 {$IFDEF WIN32}
-  ,Windows,Dialogs;
+  ,Windows;
 {$ENDIF}
 
 type
