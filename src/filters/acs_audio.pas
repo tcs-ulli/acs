@@ -173,6 +173,7 @@ type
   private
     FInput: TACSBaseAudioIn;
     FDriver: string;
+    function GetDeviceCount: Integer;
     procedure SetDevice(Ch: Integer);
     function GetDeviceInfo: TACSDeviceInfo;
     function GetDriverName(idx: Integer): string;
@@ -206,6 +207,7 @@ type
     { Returns the total count of avalible drivers
     }
     property DriversCount: Integer read GetDriversCount;
+    property DeviceCount: Integer read GetDeviceCount;
   published
     { use this property to set an driver, on create of this component the driver
       with lowest latency is used for default
@@ -644,6 +646,13 @@ procedure TACSAudioIn.SetDevice(Ch: Integer);
 begin
   if Assigned(FInput) then FInput.SetDevice(Ch);
   //  raise EACSException.Create(strNoDriverselected);
+end;
+
+function TACSAudioIn.GetDeviceCount: Integer;
+begin
+  Result := 0;
+  if Assigned(FInput) then
+    Result := FInput.GetDeviceCount;
 end;
 
 function TACSAudioIn.GetDeviceInfo: TACSDeviceInfo;
