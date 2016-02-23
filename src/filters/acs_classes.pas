@@ -17,7 +17,7 @@ interface
 uses
 
 {$IFDEF MSWINDOWS}
-  Windows, Dialogs,
+  Windows,
 {$ENDIF}
   acs_strings, Classes, SysUtils, acs_types;
 

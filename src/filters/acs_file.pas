@@ -16,7 +16,7 @@ unit acs_file;
 interface
 
 uses
-  Classes, ACS_Classes, Dialogs, SysUtils, ACS_Strings;
+  Classes, ACS_Classes, SysUtils, ACS_Strings;
 
 type
   TACSFileInClass = class of TACSCustomFileIn;
@@ -63,7 +63,6 @@ type
     FEndSample: Integer;
     FFileName: string;
     FInput: TACSCustomFileIn;
-    FDialog: TOpenDialog;
     FLoop: Boolean;
     FStartSample: Integer;
     FTotalSamples: Integer;
@@ -80,7 +79,6 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
-    procedure Open;
     procedure Flush; override;
     procedure Init; override;
     procedure Reset; override;
@@ -115,7 +113,6 @@ type
     FOnProgress: TACSOutputProgressEvent;
     FOnThreadException: TACSThreadExceptionEvent;
     FOutput: TACSCustomFileOut;
-    FDialog: TSaveDialog;
     FInput: TACSCustomInput;
 {$IFDEF LINUX}
     FAccessMask : Integer;
@@ -142,7 +139,6 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
-    procedure Open;
     property Buffersize: Integer read FBufferSize write FBufferSize;
     procedure Pause; virtual;
     procedure Resume; virtual;
@@ -252,24 +248,6 @@ destructor TACSFileIn.Destroy;
 begin
   if Assigned(FInput) then FreeAndNil(FInput);
   inherited Destroy;
-end;
-
-procedure TACSFileIn.Open;
-var
-  desc: string;
-begin
-  desc:='';
-  FDialog:=TOpenDialog.Create(nil);
-  FileFormats.BuildFilterStrings(desc, [fcLoad]);
-  FDialog.Filter:=desc;
-  if FDialog.Execute then
-  begin
-    if Assigned(FInput) then FreeAndNil(FInput);
-    FInput:=TACSFileInClass(FileFormats.FindFromFileName(FDialog.FileName, [fcLoad])).Create(nil);
-    FFileName:=FDialog.FileName;
-    if Assigned(FInput) then FInput.FileName:=FFilename;
-  end;
-  FDialog.Free;
 end;
 
 procedure TACSFileIn.Flush;
@@ -438,28 +416,6 @@ begin
     FFileMode:=AMode;
     if Assigned(FOutput) then FOutput.FileMode:=AMode;
   end;
-end;
-
-procedure TACSFileOut.Open;
-var
-  desc: string;
-begin
-  desc:='';
-  FDialog:=TSaveDialog.Create(nil);
-  FileFormats.BuildFilterStrings(desc, [fcSave]);
-  FDialog.Filter:=desc;
-  if FDialog.Execute then
-  begin
-    FOutput:=TACSFileOutClass(FileFormats.FindFromFileName(FDialog.FileName, [fcSave])).Create(nil);
-    FileName:=FDialog.FileName;
-    FOutput.FileMode:=FFileMode;
-    FOutput.Input:=FInput;
-    FInput:=FInput;
-    FOutput.OnDone:=OutputDone;
-    FOutput.OnProgress:=OutputProgress;
-    FOutput.OnThreadException:=ThreadException;
-  end;
-  FDialog.Free;
 end;
 
 procedure TACSFileOut.Pause;

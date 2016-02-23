@@ -45,12 +45,12 @@ changed mail adress
 
 }
 
-{$ifdef mswindows}{$message error 'unit not supported'}{$endif}
 
 unit acs_alsaaudio;
 
 interface
 
+{$ifndef mswindows}
 uses
   Classes, SysUtils, ACS_Types, ACS_Classes, baseunix, alsa, ACS_Strings,ACS_Audio;
 
@@ -143,8 +143,9 @@ type
     property SilentOnUnderrun : Boolean read FSilentOnUnderrun write FSilentOnUnderrun;
     property Volume : Byte read FVolume write FVolume stored True;
   end;
-
+{$endif}
 implementation
+{$ifndef mswindows}
 
   constructor TALSAAudioIn.Create;
   begin
@@ -477,5 +478,5 @@ initialization
       RegisterAudioOut('Alsa',TAlsaAudioOut,LATENCY);
       RegisterAudioIn('Alsa',TAlsaAudioIn,LATENCY);
     end;
-
+{$endif}
 end.

@@ -11,11 +11,8 @@ interface
 
 uses
   Classes, SysUtils, ACS_Classes, ACS_Strings
-  {$ifdef fpc}
-  ,LazUTF8
-  {$endif}
   {$IFDEF MSWINDOWS}
-  ,MMSystem, Windows, Dialogs
+  ,MMSystem, Windows
   ,Math
   {$ELSE}
   ,Soundcard, baseunix

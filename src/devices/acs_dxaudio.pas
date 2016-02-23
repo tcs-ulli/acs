@@ -76,7 +76,7 @@ unit acs_dxaudio;
 interface
 
 uses
-  ACS_Audio,SysUtils, Classes, Forms, ACS_Types, ACS_Classes, Windows,ACS_Strings;
+  ACS_Audio,SysUtils, Classes, ACS_Types, ACS_Classes, Windows,ACS_Strings;
 
 const
   LATENCY = 25;
@@ -226,7 +226,6 @@ procedure TDXAudioOut.Prepare;
 var
   Res : HResult;
   Wnd : HWND;
-  Form : TForm;
 begin
   if (FDeviceNumber >= FDeviceCount) then raise EACSException.Create(Format(strChannelnotavailable,[FDeviceNumber]));
   FInput.Init;
@@ -237,11 +236,6 @@ begin
   DSW_Init(@DSW);
   Res := DSW_InitOutputDevice(@DSW, Devices.dinfo[FDeviceNumber].guid);
   if Res <> 0 then raise EACSException.Create(strFailedtoCreateDSdev);
-{  if Owner is TForm then
-  begin
-    Form := Owner as TForm;
-    Wnd := Form.Handle;
-  end else }
   Wnd := 0;
   Res := DSW_InitOutputBuffer(@DSW, Wnd, BPS, SR, Chan, FBufferSize);
   if Res <> 0 then raise EACSException.Create(strFailedtoCreateDSbuf);
