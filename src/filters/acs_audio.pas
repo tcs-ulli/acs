@@ -753,7 +753,7 @@ end;
 
 procedure TACSAudioIn.Flush;
 begin
-  if not Assigned(FInput) then FInput.Flush;
+  if Assigned(FInput) then FInput.Flush;
     //raise EACSException.Create(strNoDriverselected);
 end;
 
