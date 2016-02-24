@@ -189,6 +189,7 @@ type
     function GetCh: Integer; override;
     function GetSR: Integer; override;
     function GetTotalTime: Real; override;
+    procedure SetDefaultDriver();
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -673,6 +674,40 @@ begin
   //  raise EACSException.Create(strNoDriverselected);
 end;
 
+procedure TACSAudioIn.SetDefaultDriver;
+var
+  lowestindex, lowest, minlat, i: Integer;
+  Done: Boolean;
+begin
+  minlat:=0;
+  Done:=False;
+
+  FDriver := 'No Driver';
+  while not Done do
+  begin
+    lowest:=99999;
+    for i:=0 to Length(InDriverInfos)-1 do
+    begin
+      if (InDriverInfos[i].Latency < lowest) and (InDriverInfos[i].Latency > minlat) then
+      begin
+        lowest:=InDriverInfos[i].Latency;
+        lowestindex:=i;
+      end;
+    end;
+
+    Done:=True;
+    if lowest < 99999 then
+    begin
+      try
+        SetDriver(InDriverInfos[lowestindex].DriverName);
+      except
+        minlat:=lowest+1;
+        Done:=False;
+      end;
+    end;
+  end;
+end;
+
 function TACSAudioIn.GetDriverName(idx: Integer): string;
 begin
   Result:='';
@@ -756,6 +791,8 @@ end;
 
 procedure TACSAudioIn.Init;
 begin
+  if not Assigned(FInput) then
+    SetDefaultDriver();
   if Assigned(FInput) then FInput.Init;
     //raise EACSException.Create(strNoDriverselected);
 end;

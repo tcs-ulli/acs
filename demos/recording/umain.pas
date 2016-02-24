@@ -56,7 +56,7 @@ begin
   for i := 0 to Mixer1.Channelcount-1 do
     if Mixer1.ChannelName[i] = cbRecordSource.Text then
       Mixer1.RecordSource := i;
-  for i := 0 to AudioIn1.DevcChannelcount-1 do
+  //for i := 0 to AudioIn1.DevcChannelcount-1 do
 end;
 
 procedure TfMain.FormCreate(Sender: TObject);

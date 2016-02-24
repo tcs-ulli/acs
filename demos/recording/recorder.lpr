@@ -6,6 +6,7 @@ uses
   {$IFDEF UNIX}
   cthreads,
   {$ENDIF}
+  laz_acs,
   Interfaces, // this includes the LCL widgetset
   Forms
   { you can add units after this }
